@@ -25,7 +25,7 @@ type linuxSetnsInit struct {
 	pidfdSocket   *os.File
 	config        *initConfig
 	logPipe       *os.File
-	dmzExe        *os.File
+	addHome       bool
 }
 
 func (l *linuxSetnsInit) getSessionRingName() string {
@@ -72,12 +72,13 @@ func (l *linuxSetnsInit) Init() error {
 		unix.Umask(int(*l.config.Config.Umask))
 	}
 
-	if l.config.Config.Scheduler != nil {
-		if err := setupScheduler(l.config.Config); err != nil {
-			return err
-		}
+	if err := setupScheduler(l.config.Config); err != nil {
+		return err
 	}
 
+	if err := setupIOPriority(l.config.Config); err != nil {
+		return err
+	}
 	// Tell our parent that we're ready to exec. This must be done before the
 	// Seccomp rules have been applied, because we need to be able to read and
 	// write to a socket.
@@ -101,7 +102,7 @@ func (l *linuxSetnsInit) Init() error {
 			return err
 		}
 	}
-	if err := finalizeNamespace(l.config); err != nil {
+	if err := finalizeNamespace(l.config, l.addHome); err != nil {
 		return err
 	}
 	if err := apparmor.ApplyProfile(l.config.AppArmorProfile); err != nil {
@@ -141,10 +142,6 @@ func (l *linuxSetnsInit) Init() error {
 		return fmt.Errorf("close log pipe: %w", err)
 	}
 
-	if l.dmzExe != nil {
-		l.config.Args[0] = name
-		return system.Fexecve(l.dmzExe.Fd(), l.config.Args, os.Environ())
-	}
 	// Close all file descriptors we are not passing to the container. This is
 	// necessary because the execve target could use internal runc fds as the
 	// execve path, potentially giving access to binary files from the host
@@ -155,13 +152,8 @@ func (l *linuxSetnsInit) Init() error {
 	// (otherwise the (*os.File) finaliser could close the wrong file). See
 	// CVE-2024-21626 for more information as to why this protection is
 	// necessary.
-	//
-	// This is not needed for runc-dmz, because the extra execve(2) step means
-	// that all O_CLOEXEC file descriptors have already been closed and thus
-	// the second execve(2) from runc-dmz cannot access internal file
-	// descriptors from runc.
 	if err := utils.UnsafeCloseFrom(l.config.PassedFilesCount + 3); err != nil {
 		return err
 	}
-	return system.Exec(name, l.config.Args, os.Environ())
+	return system.Exec(name, l.config.Args, l.config.Env)
 }

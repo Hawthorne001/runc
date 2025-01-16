@@ -472,7 +472,7 @@ func testFreeze(t *testing.T, withSystemd bool, useSet bool) {
 	if !useSet {
 		err = container.Pause()
 	} else {
-		config.Cgroups.Resources.Freezer = configs.Frozen
+		config.Cgroups.Resources.Freezer = cgroups.Frozen
 		err = container.Set(*config)
 	}
 	ok(t, err)
@@ -486,7 +486,7 @@ func testFreeze(t *testing.T, withSystemd bool, useSet bool) {
 	if !useSet {
 		err = container.Resume()
 	} else {
-		config.Cgroups.Resources.Freezer = configs.Thawed
+		config.Cgroups.Resources.Freezer = cgroups.Thawed
 		err = container.Set(*config)
 	}
 	ok(t, err)
@@ -1022,13 +1022,13 @@ func TestHook(t *testing.T) {
 			}),
 		},
 		configs.CreateContainer: configs.HookList{
-			configs.NewCommandHook(configs.Command{
+			configs.NewCommandHook(&configs.Command{
 				Path: "/bin/bash",
 				Args: []string{"/bin/bash", "-c", fmt.Sprintf("touch ./%s", hookFiles[configs.CreateContainer])},
 			}),
 		},
 		configs.StartContainer: configs.HookList{
-			configs.NewCommandHook(configs.Command{
+			configs.NewCommandHook(&configs.Command{
 				Path: "/bin/sh",
 				Args: []string{"/bin/sh", "-c", fmt.Sprintf("touch /%s", hookFiles[configs.StartContainer])},
 			}),

@@ -26,8 +26,8 @@ type linuxStandardInit struct {
 	parentPid     int
 	fifoFile      *os.File
 	logPipe       *os.File
-	dmzExe        *os.File
 	config        *initConfig
+	addHome       bool
 }
 
 func (l *linuxStandardInit) getSessionRingParams() (string, uint32, uint32) {
@@ -156,15 +156,12 @@ func (l *linuxStandardInit) Init() error {
 		}
 	}
 
-	if l.config.Config.Scheduler != nil {
-		if err := setupScheduler(l.config.Config); err != nil {
-			return err
-		}
+	if err := setupScheduler(l.config.Config); err != nil {
+		return err
 	}
-	if l.config.Config.IOPriority != nil {
-		if err := setIOPriority(l.config.Config.IOPriority); err != nil {
-			return err
-		}
+
+	if err := setupIOPriority(l.config.Config); err != nil {
+		return err
 	}
 
 	// Tell our parent that we're ready to exec. This must be done before the
@@ -190,7 +187,7 @@ func (l *linuxStandardInit) Init() error {
 			return err
 		}
 	}
-	if err := finalizeNamespace(l.config); err != nil {
+	if err := finalizeNamespace(l.config, l.addHome); err != nil {
 		return err
 	}
 	// finalizeNamespace can change user/group which clears the parent death
@@ -198,6 +195,17 @@ func (l *linuxStandardInit) Init() error {
 	if err := pdeath.Restore(); err != nil {
 		return fmt.Errorf("can't restore pdeath signal: %w", err)
 	}
+
+	// In case we have any StartContainer hooks to run, and they don't
+	// have environment configured explicitly, make sure they will be run
+	// with the same environment as container's init.
+	//
+	// NOTE the above described behavior is not part of runtime-spec, but
+	// rather a de facto historical thing we afraid to change.
+	if h := l.config.Config.Hooks[configs.StartContainer]; len(h) > 0 {
+		h.SetDefaultEnv(l.config.Env)
+	}
+
 	// Compare the parent from the initial start of the init process and make
 	// sure that it did not change.  if the parent changes that means it died
 	// and we were reparented to something else so we should just kill ourself
@@ -268,17 +276,14 @@ func (l *linuxStandardInit) Init() error {
 	// https://github.com/torvalds/linux/blob/v4.9/fs/exec.c#L1290-L1318
 	_ = l.fifoFile.Close()
 
-	s := l.config.SpecState
-	s.Pid = unix.Getpid()
-	s.Status = specs.StateCreated
-	if err := l.config.Config.Hooks.Run(configs.StartContainer, s); err != nil {
-		return err
+	if s := l.config.SpecState; s != nil {
+		s.Pid = unix.Getpid()
+		s.Status = specs.StateCreated
+		if err := l.config.Config.Hooks.Run(configs.StartContainer, s); err != nil {
+			return err
+		}
 	}
 
-	if l.dmzExe != nil {
-		l.config.Args[0] = name
-		return system.Fexecve(l.dmzExe.Fd(), l.config.Args, os.Environ())
-	}
 	// Close all file descriptors we are not passing to the container. This is
 	// necessary because the execve target could use internal runc fds as the
 	// execve path, potentially giving access to binary files from the host
@@ -289,13 +294,8 @@ func (l *linuxStandardInit) Init() error {
 	// (otherwise the (*os.File) finaliser could close the wrong file). See
 	// CVE-2024-21626 for more information as to why this protection is
 	// necessary.
-	//
-	// This is not needed for runc-dmz, because the extra execve(2) step means
-	// that all O_CLOEXEC file descriptors have already been closed and thus
-	// the second execve(2) from runc-dmz cannot access internal file
-	// descriptors from runc.
 	if err := utils.UnsafeCloseFrom(l.config.PassedFilesCount + 3); err != nil {
 		return err
 	}
-	return system.Exec(name, l.config.Args, os.Environ())
+	return system.Exec(name, l.config.Args, l.config.Env)
 }

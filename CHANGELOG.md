@@ -6,6 +6,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### libcontainer API
+ * `configs.CommandHook` struct has changed, Command is now a pointer.
+   Also, `configs.NewCommandHook` now accepts a `*Command`. (#4325)
+
+## [1.2.0] - 2024-10-22
+
+> できるときにできることをやるんだ。それが今だ。
+
+### Added
+ * In order to alleviate the remaining concerns around the memory usage and
+   (arguably somewhat unimportant, but measurable) performance overhead of
+   memfds for cloning `/proc/self/exe`, we have added a new protection using
+   `overlayfs` that is used if you have enough privileges and the running
+   kernel supports it. It has effectively no performance nor memory overhead
+   (compared to no cloning at all). (#4448)
+
+### Fixed
+ * The original fix for [CVE-2024-45310][cve-2024-45310] was intentionally very
+   limited in scope to make it easier to review, however it also did not handle
+   all possible `os.MkdirAll` cases and thus could lead to regressions. We have
+   switched to the more complete implementation in the newer versions of
+   `github.com/cyphar/filepath-securejoin`. (#4393, #4400, #4421, #4430)
+ * In certain situations (a system with lots of mounts or racing mounts) we
+   could accidentally end up leaking mounts from the container into the host.
+   This has been fixed. (#4417)
+ * The fallback logic for `O_TMPFILE` clones of `/proc/self/exe` had a minor
+   bug that would cause us to miss non-`noexec` directories and thus fail to
+   start containers on some systems. (#4444)
+ * Sometimes the cloned `/proc/self/exe` file descriptor could be placed in a
+   way that it would get clobbered by the Go runtime. We had a fix for this
+   already but it turns out it could still break in rare circumstances, but it
+   has now been fixed. (#4294, #4452)
+
+### Changed
+ * It is not possible for `runc kill` to work properly in some specific
+   configurations (such as rootless containers with no cgroups and a shared pid
+   namespace). We now output a warning for such configurations. (#4398)
+ * memfd-bind: update the documentation and make path handling with the systemd
+   unit more idiomatic. (#4428)
+ * We now use v0.16 of Cilium's eBPF library, including fixes that quite a few
+   downstreams asked for. (#4397, #4396)
+ * Some internal `runc init` synchronisation that was no longer necessary (due
+   to the `/proc/self/exe` cloning move to Go) was removed. (#4441)
+
+[cve-2024-45310]: https://github.com/opencontainers/runc/security/advisories/GHSA-jfvp-7x6p-h2pv
+
+## [1.2.0-rc.3] - 2024-09-02
+
+> The supreme happiness of life is the conviction that we are loved.
+
+### Security
+
+ * Fix [CVE-2024-45310][cve-2024-45310], a low-severity attack that allowed
+   maliciously configured containers to create empty files and directories on
+   the host.
+
+### Added
+
+ * Document build prerequisites for different platforms. (#4353)
+
+### Fixed
+
+ * Try to delete exec fifo file when failure in creation. (#4319)
+ * Revert "libcontainer: seccomp: pass around *os.File for notifyfd". (#4337)
+ * Fix link to gvariant documentation in systemd docs. (#4369)
+
+### Changed
+
+ * Remove pre-go1.17 build-tags. (#4329)
+ * libct/userns: assorted (godoc) improvements. (#4330)
+ * libct/userns: split userns detection from internal userns code. (#4331)
+ * rootfs: consolidate mountpoint creation logic. (#4359)
+ * Add Go 1.23, drop 1.21. (#4360)
+ * Revert "allow overriding VERSION value in Makefile" and add `EXTRA_VERSION`.
+   (#4370)
+ * Mv contrib/cmd tests/cmd (except memfd-bind). (#4377)
+ * Makefile: Don't read COMMIT, BUILDTAGS, `EXTRA_BUILDTAGS` from env vars.
+   (#4380)
+
+[cve-2024-45310]: https://github.com/opencontainers/runc/security/advisories/GHSA-jfvp-7x6p-h2pv
+
 ## [1.2.0-rc.2] - 2024-06-26
 
 > TRUE or FALSE, it's a problem!
@@ -222,6 +303,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    obsoleted by more generic container hooks. (#3350)
 
 [cve-2019-5736]: https://github.com/advisories/GHSA-gxmr-w5mj-v8hh
+
+## [1.1.15] - 2024-10-07
+
+> How, dear sir, did you cross the flood? By not stopping, friend, and by not
+> straining I crossed the flood.
+
+### Fixed
+
+ * The `-ENOSYS` seccomp stub is now always generated for the native
+   architecture that `runc` is running on. This is needed to work around some
+   arguably specification-incompliant behaviour from Docker on architectures
+   such as ppc64le, where the allowed architecture list is set to `null`. This
+   ensures that we always generate at least one `-ENOSYS` stub for the native
+   architecture even with these weird configs. (#4391)
+ * On a system with older kernel, reading `/proc/self/mountinfo` may skip some
+   entries, as a consequence runc may not properly set mount propagation,
+   causing container mounts leak onto the host mount namespace. (#2404, #4425)
+
+### Removed
+
+ * In order to fix performance issues in the "lightweight" bindfd protection
+   against [CVE-2019-5736], the temporary `ro` bind-mount of `/proc/self/exe`
+   has been removed. runc now creates a binary copy in all cases. (#4392, #2532)
+
+[CVE-2019-5736]: https://www.openwall.com/lists/oss-security/2019/02/11/2
+
+## [1.1.14] - 2024-09-03
+
+> 年を取っていいことは、驚かなくなることね。
+
+### Security
+
+ * Fix [CVE-2024-45310][cve-2024-45310], a low-severity attack that allowed
+   maliciously configured containers to create empty files and directories on
+   the host.
+
+[cve-2024-45310]: https://github.com/opencontainers/runc/security/advisories/GHSA-jfvp-7x6p-h2pv
+
+### Added
+
+ * Add support for Go 1.23. (#4360, #4372)
+
+### Fixed
+
+ * Revert "allow overriding VERSION value in Makefile" and add `EXTRA_VERSION`.
+   (#4370, #4382)
+ * rootfs: consolidate mountpoint creation logic. (#4359)
 
 ## [1.1.13] - 2024-06-13
 
@@ -745,7 +873,8 @@ implementation (libcontainer) is *not* covered by this policy.
    cgroups at all during `runc update`). (#2994)
 
 <!-- minor releases -->
-[Unreleased]: https://github.com/opencontainers/runc/compare/v1.2.0-rc.2...HEAD
+[Unreleased]: https://github.com/opencontainers/runc/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/opencontainers/runc/compare/v1.2.0-rc.1...v1.2.0
 [1.1.0]: https://github.com/opencontainers/runc/compare/v1.1.0-rc.1...v1.1.0
 [1.0.0]: https://github.com/opencontainers/runc/releases/tag/v1.0.0
 
@@ -756,7 +885,9 @@ implementation (libcontainer) is *not* covered by this policy.
 [1.0.1]: https://github.com/opencontainers/runc/compare/v1.0.0...v1.0.1
 
 <!-- 1.1.z patch releases -->
-[Unreleased 1.1.z]: https://github.com/opencontainers/runc/compare/v1.1.13...release-1.1
+[Unreleased 1.1.z]: https://github.com/opencontainers/runc/compare/v1.1.15...release-1.1
+[1.1.15]: https://github.com/opencontainers/runc/compare/v1.1.14...v1.1.15
+[1.1.14]: https://github.com/opencontainers/runc/compare/v1.1.13...v1.1.14
 [1.1.13]: https://github.com/opencontainers/runc/compare/v1.1.12...v1.1.13
 [1.1.12]: https://github.com/opencontainers/runc/compare/v1.1.11...v1.1.12
 [1.1.11]: https://github.com/opencontainers/runc/compare/v1.1.10...v1.1.11
@@ -773,5 +904,7 @@ implementation (libcontainer) is *not* covered by this policy.
 [1.1.0-rc.1]: https://github.com/opencontainers/runc/compare/v1.0.0...v1.1.0-rc.1
 
 <!-- 1.2.z patch releases -->
+[Unreleased 1.2.z]: https://github.com/opencontainers/runc/compare/v1.2.0...release-1.2
+[1.2.0-rc.3]: https://github.com/opencontainers/runc/compare/v1.2.0-rc.2...v1.2.0-rc.3
 [1.2.0-rc.2]: https://github.com/opencontainers/runc/compare/v1.2.0-rc.1...v1.2.0-rc.2
 [1.2.0-rc.1]: https://github.com/opencontainers/runc/compare/v1.1.0...v1.2.0-rc.1

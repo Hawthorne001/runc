@@ -24,39 +24,24 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-20.04, ubuntu-24.04, actuated-arm64-6cpu-8gb]
-        go-version: [1.21.x, 1.22.x]
+        go-version: [1.22.x, 1.23.x]
         rootless: ["rootless", ""]
         race: ["-race", ""]
         criu: ["", "criu-dev"]
-        dmz: ["", "runc_nodmz"]
         exclude:
           # Disable most of criu-dev jobs, as they are expensive
           # (need to compile criu) and don't add much value/coverage.
           - criu: criu-dev
-            go-version: 1.21.x
+            go-version: 1.22.x
           - criu: criu-dev
             rootless: rootless
           - criu: criu-dev
             race: -race
-          - criu: criu-dev
-            dmz: runc_nodmz
-          # Disable most of runc_nodmz jobs, as they don't add much value
-          # (as dmz is disabled by default anyway).
-          - dmz: runc_nodmz
-            os: ubuntu-20.04
-          - dmz: runc_nodmz
-            go-version: 1.21.x
-          - dmz: runc_nodmz
-            rootless: rootless
-          - dmz: runc_nodmz
-            race: -race
-          - go-version: 1.21.x
+          - go-version: 1.22.x
             os: actuated-arm64-6cpu-8gb
           - race: "-race"
             os: actuated-arm64-6cpu-8gb
           - criu: criu-dev
-            os: actuated-arm64-6cpu-8gb
-          - dmz: runc_nodmz
             os: actuated-arm64-6cpu-8gb
 
     runs-on: ${{ matrix.os }}
@@ -150,14 +135,16 @@ jobs:
         check-latest: true
 
     - name: build
-      env:
-        EXTRA_BUILDTAGS: ${{ matrix.dmz }}
       run: sudo -E PATH="$PATH" make EXTRA_FLAGS="${{ matrix.race }}" all
 
-    - name: install bats
-      uses: mig4/setup-bats@v1
+    - name: Setup Bats and bats libs
+      uses: bats-core/bats-action@3.0.0
       with:
         bats-version: 1.9.0
+        support-install: false
+        assert-install: false
+        detik-install: false
+        file-install: false
 
     - name: Allow userns for runc
       # https://discourse.ubuntu.com/t/ubuntu-24-04-lts-noble-numbat-release-notes/39890#unprivileged-user-namespace-restrictions-15
@@ -167,8 +154,6 @@ jobs:
 
     - name: unit test
       if: matrix.rootless != 'rootless'
-      env:
-        EXTRA_BUILDTAGS: ${{ matrix.dmz }}
       run: sudo -E PATH="$PATH" -- make TESTFLAGS="${{ matrix.race }}" localunittest
 
     - name: add rootless user
@@ -205,8 +190,6 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
-      matrix:
-        dmz: ["", "runc_nodmz"]
     runs-on: ubuntu-22.04
 
     steps:
@@ -230,6 +213,12 @@ jobs:
         check-latest: true
 
     - name: unit test
-      env:
-        EXTRA_BUILDTAGS: ${{ matrix.dmz }}
       run: sudo -E PATH="$PATH" -- make GOARCH=386 localunittest
+
+  all-done:
+    needs:
+    - test
+    - cross-i386
+    runs-on: ubuntu-24.04
+    steps:
+    - run: echo "All jobs completed"
